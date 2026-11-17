@@ -1,0 +1,46 @@
+name: Update prices
+
+on:
+  schedule:
+    - cron: "30 4 * * *" # relics.run publishes around 02:20 UTC
+    - cron: "30 16 * * *" # second chance if the morning run failed
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-prices
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Keeps whatever downloaded cleanly even if another file failed, then
+      # fails the run at the end so GitHub sends a notification.
+      - name: Download and validate
+        id: update
+        continue-on-error: true
+        run: python3 scripts/update.py
+
+      - name: Commit changes
+        run: |
+          git add price_history_latest.json items.json meta.json
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: update prices $(jq -r .price_date meta.json)"
+          git push
+
+      - name: Report failure
+        if: steps.update.outcome == 'failure'
+        run: |
+          echo "::error::Price update failed. The last good data is still published."
+          exit 1
